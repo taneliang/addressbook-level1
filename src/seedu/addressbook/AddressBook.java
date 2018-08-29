@@ -66,6 +66,7 @@ public class AddressBook {
      * =========================================================================
      */
     private static final String MESSAGE_ADDED = "New person added: %1$s, Phone: %2$s, Email: %3$s";
+    private static final String MESSAGE_UPDATED  = "Person %1$s updated: %2$s, Phone: %3$s, Email: %4$s";
     private static final String MESSAGE_ADDRESSBOOK_CLEARED = "Address book has been cleared!";
     private static final String MESSAGE_COMMAND_HELP = "%1$s: %2$s";
     private static final String MESSAGE_COMMAND_HELP_PARAMETERS = "\tParameters: %1$s";
@@ -104,6 +105,13 @@ public class AddressBook {
                                                       + PERSON_DATA_PREFIX_PHONE + "PHONE_NUMBER "
                                                       + PERSON_DATA_PREFIX_EMAIL + "EMAIL";
     private static final String COMMAND_ADD_EXAMPLE = COMMAND_ADD_WORD + " John Doe p/98765432 e/johnd@gmail.com";
+
+    private static final String COMMAND_UPDATE_WORD = "update";
+    private static final String COMMAND_UPDATE_DESC = "Updates an existing person in the address book.";
+    private static final String COMMAND_UPDATE_PARAMETERS = "INDEX NAME "
+            + PERSON_DATA_PREFIX_PHONE + "PHONE_NUMBER "
+            + PERSON_DATA_PREFIX_EMAIL + "EMAIL";
+    private static final String COMMAND_UPDATE_EXAMPLE = COMMAND_UPDATE_WORD + " 1 Jane Doe p/89765432 e/janed@gmail.com";
 
     private static final String COMMAND_FIND_WORD = "find";
     private static final String COMMAND_FIND_DESC = "Finds all persons whose names contain any of the specified "
@@ -371,6 +379,8 @@ public class AddressBook {
         switch (commandType) {
         case COMMAND_ADD_WORD:
             return executeAddPerson(commandArgs);
+        case COMMAND_UPDATE_WORD:
+            return executeUpdatePerson(commandArgs);
         case COMMAND_FIND_WORD:
             return executeFindPersons(commandArgs);
         case COMMAND_LIST_WORD:
@@ -440,6 +450,49 @@ public class AddressBook {
     private static String getMessageForSuccessfulAddPerson(String[] addedPerson) {
         return String.format(MESSAGE_ADDED,
                 getNameFromPerson(addedPerson), getPhoneFromPerson(addedPerson), getEmailFromPerson(addedPerson));
+    }
+
+    /**
+     * Updates a person (specified by the command args) already in the address book.
+     * The command arguments string should be a person index followed by a string representation of the person to
+     * update.
+     *
+     * @param commandArgs full command args string from the user
+     * @return feedback display message for the operation result
+     */
+    private static String executeUpdatePerson(String commandArgs) {
+        // try decoding an index
+        final int targetVisibleIndex = extractTargetIndexFromUpdatePersonArgs(commandArgs);
+        if (!isDisplayIndexValidForLastPersonListingView(targetVisibleIndex)) {
+            return MESSAGE_INVALID_PERSON_DISPLAYED_INDEX;
+        }
+
+        // try decoding a person and check if person are valid
+        // (decode result will not be present if the person is invalid)
+        final Optional<String[]> decodeResult = decodePersonFromString(commandArgs, true);
+        if (!decodeResult.isPresent()) {
+            return getMessageForInvalidCommandInput(COMMAND_UPDATE_WORD, getUsageInfoForUpdateCommand());
+        }
+
+        // add the person as specified
+        final String[] targetInModel = getPersonByLastVisibleIndex(targetVisibleIndex);
+        final String[] updatedPerson = decodeResult.get();
+        updatePersonInAddressBook(targetInModel, updatedPerson);
+        return getMessageForSuccessfulUpdatePerson(targetInModel, updatedPerson);
+    }
+
+    /**
+     * Constructs a feedback message for a successful update person command execution.
+     *
+     * @see #executeUpdatePerson(String)
+     * @param oldPerson original person who was successfully overwritten
+     * @param newPerson the updated person
+     * @return successful update person feedback message
+     */
+    private static String getMessageForSuccessfulUpdatePerson(String[] oldPerson, String[] newPerson) {
+        return String.format(MESSAGE_UPDATED,
+                getNameFromPerson(oldPerson), getNameFromPerson(newPerson), getPhoneFromPerson(newPerson),
+                getEmailFromPerson(newPerson));
     }
 
     /**
@@ -525,6 +578,17 @@ public class AddressBook {
         } catch (NumberFormatException nfe) {
             return false;
         }
+    }
+
+    /**
+     * Extracts the target's index from the raw update person args string
+     *
+     * @param rawArgs raw command args string for the update person command
+     * @return extracted index
+     */
+    private static int extractTargetIndexFromUpdatePersonArgs(String rawArgs) {
+        String[] encodedParts = rawArgs.split("\\s+");
+        return Integer.parseInt(encodedParts[0].trim());
     }
 
     /**
@@ -788,6 +852,18 @@ public class AddressBook {
     }
 
     /**
+     * Updates a person in the address book. Saves changes to storage file.
+     *
+     * @param oldPerson index of person to be updated
+     * @param newPerson to update
+     */
+    private static void updatePersonInAddressBook(String[] oldPerson, String[] newPerson) {
+        int targetIndex = ALL_PERSONS.indexOf(oldPerson);
+        ALL_PERSONS.set(targetIndex, newPerson);
+        savePersonsToFile(getAllPersonsInAddressBook(), storageFilePath);
+    }
+
+    /**
      * Deletes the specified person from the addressbook if it is inside. Saves any changes to storage file.
      *
      * @param exactPerson the actual person inside the address book (exactPerson == the person to delete in the full list)
@@ -916,6 +992,17 @@ public class AddressBook {
      *         else: Optional containing decoded person
      */
     private static Optional<String[]> decodePersonFromString(String encoded) {
+        return decodePersonFromString(encoded, false);
+    }
+    private static Optional<String[]> decodePersonFromString(String encodedRawPerson, boolean ignoreIndex) {
+        // remove index if necessary
+        String encoded = encodedRawPerson;
+        if (ignoreIndex) {
+            String[] encodedParts = encodedRawPerson.split("\\s+");
+            encodedParts = Arrays.copyOfRange(encodedParts, 1, encodedParts.length);
+            encoded = String.join(" ", encodedParts);
+        }
+
         // check that we can extract the parts of a person from the encoded string
         if (!isPersonDataExtractableFrom(encoded)) {
             return Optional.empty();
@@ -1083,6 +1170,7 @@ public class AddressBook {
     /** Returns usage info for all commands */
     private static String getUsageInfoForAllCommands() {
         return getUsageInfoForAddCommand() + LS
+                + getUsageInfoForUpdateCommand() + LS
                 + getUsageInfoForFindCommand() + LS
                 + getUsageInfoForViewCommand() + LS
                 + getUsageInfoForDeleteCommand() + LS
@@ -1096,6 +1184,13 @@ public class AddressBook {
         return String.format(MESSAGE_COMMAND_HELP, COMMAND_ADD_WORD, COMMAND_ADD_DESC) + LS
                 + String.format(MESSAGE_COMMAND_HELP_PARAMETERS, COMMAND_ADD_PARAMETERS) + LS
                 + String.format(MESSAGE_COMMAND_HELP_EXAMPLE, COMMAND_ADD_EXAMPLE) + LS;
+    }
+
+    /** Returns the string for showing 'update' command usage instruction */
+    private static String getUsageInfoForUpdateCommand() {
+        return String.format(MESSAGE_COMMAND_HELP, COMMAND_UPDATE_WORD, COMMAND_UPDATE_DESC) + LS
+                + String.format(MESSAGE_COMMAND_HELP_PARAMETERS, COMMAND_UPDATE_PARAMETERS) + LS
+                + String.format(MESSAGE_COMMAND_HELP_EXAMPLE, COMMAND_UPDATE_EXAMPLE) + LS;
     }
 
     /** Returns the string for showing 'find' command usage instruction */
